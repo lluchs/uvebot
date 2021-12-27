@@ -194,7 +194,11 @@ func checkCurrentProjects(s *discordgo.Session, guildID string) (string, error) 
 			fmt.Fprintf(&msg, "- %s: on website but not in #current-projects\n", id)
 		}
 	}
-	for id := range projectsMap {
+	for id, project := range projectsMap {
+		if time.Now().AddDate(0, 0, -2).After(project.Deadline) {
+			// deadline has passed, skip
+			continue
+		}
 		if _, ok := websiteMap[id]; !ok {
 			fmt.Fprintf(&msg, "- %s: missing on website\n", id)
 		}
