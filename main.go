@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"net/http"
 	"os"
@@ -12,27 +11,22 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/bwmarrin/discordgo"
+	"github.com/robfig/cron/v3"
 )
 
 const (
-	WebsiteURL = "https://www.untitledvirtualensemble.org"
+	WebsiteURL            = "https://www.untitledvirtualensemble.org" // URL of the UVE website
+	UVEGuildID            = "851213338481655878"                      // ID of the UVE guild
+	TechTeamRoleID        = "851304372976746497"                      // ID of the @Teach Team role
+	TechTeamChannelID     = "909798620281311312"                      // ID of the #tech-team channel
+	CheckProjectsSchedule = "0 12 * * *"                              // cron configuration for the projects check
 )
-
-// Variables used for command line parameters
-var (
-	Token string
-)
-
-func init() {
-
-	flag.StringVar(&Token, "t", "", "Bot Token")
-	flag.Parse()
-}
 
 func main() {
+	token := os.Getenv("DISCORD_TOKEN")
 
 	// Create a new Discord session using the provided bot token.
-	dg, err := discordgo.New("Bot " + Token)
+	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
 		fmt.Println("error creating Discord session,", err)
 		return
@@ -51,12 +45,18 @@ func main() {
 		return
 	}
 
+	// cronjob setup
+	c := cron.New()
+	c.AddFunc(CheckProjectsSchedule, func() { checkProjectsCron(dg) })
+	c.Start()
+
 	// Wait here until CTRL-C or other term signal is received.
 	fmt.Println("Bot is now running.  Press CTRL-C to exit.")
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
 	<-sc
 
+	c.Stop()
 	// Cleanly close down the Discord session.
 	dg.Close()
 }
@@ -107,6 +107,17 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			res = "All good!"
 		}
 		s.ChannelMessageSend(m.ChannelID, res)
+	}
+}
+
+func checkProjectsCron(s *discordgo.Session) {
+	res, err := checkCurrentProjects(s, UVEGuildID)
+	if err != nil {
+		s.ChannelMessageSend(TechTeamChannelID, fmt.Sprintf("!check-projects error: %s", err))
+		return
+	}
+	if res != "" {
+		s.ChannelMessageSend(TechTeamChannelID, fmt.Sprintf("<@&%s>\n%s", TechTeamRoleID, res))
 	}
 }
 
