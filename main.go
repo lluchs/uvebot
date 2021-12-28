@@ -129,10 +129,10 @@ type Project struct {
 	Deadline time.Time
 }
 
-// relativeYear sets the year so that the timestamp is after the reference timestamp.
+// relativeYear sets the year so that the timestamp is closest to the reference timestamp.
 func relativeYear(time, ref time.Time) time.Time {
 	t := time.AddDate(ref.Year(), 0, 0)
-	if t.Month() < ref.Month() {
+	if t.Month() < ref.Month() && ref.Sub(t).Hours() > 365/2*24 {
 		t = t.AddDate(1, 0, 0)
 	}
 	return t
@@ -146,7 +146,7 @@ func parseProject(msg *discordgo.Message, channels []*discordgo.Channel) (*Proje
 		// Deadline: December 29 (Extension)
 		if strings.HasPrefix(line, "Deadline: ") {
 			parts := strings.Split(line, " ")
-			t, err := time.Parse("January 2", fmt.Sprintf("%s %s", parts[1], parts[2]))
+			t, err := time.Parse("January 2", fmt.Sprintf("%s %s", parts[1], strings.ReplaceAll(parts[2], "th", "")))
 			if err != nil {
 				return nil, fmt.Errorf("could not parse time for %s: %w", p.Name, err)
 			}
