@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -129,6 +130,13 @@ type Project struct {
 	Deadline time.Time
 }
 
+// ProjectsByDeadline implements sort.Interface for []*Person based on the Deadline field.
+type ProjectsByDeadline []*Project
+
+func (a ProjectsByDeadline) Len() int           { return len(a) }
+func (a ProjectsByDeadline) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ProjectsByDeadline) Less(i, j int) bool { return a[i].Deadline.Before(a[j].Deadline) }
+
 // relativeYear sets the year so that the timestamp is closest to the reference timestamp.
 func relativeYear(time, ref time.Time) time.Time {
 	t := time.AddDate(ref.Year(), 0, 0)
@@ -243,6 +251,7 @@ func getCurrentProjects(s *discordgo.Session, guildID string) ([]*Project, error
 		}
 		projects = append(projects, p)
 	}
+	sort.Sort(ProjectsByDeadline(projects))
 	return projects, nil
 }
 
@@ -283,5 +292,6 @@ func getWebsiteProjects() ([]*Project, error) {
 	if innerErr != nil {
 		return nil, innerErr
 	}
+	sort.Sort(ProjectsByDeadline(projects))
 	return projects, nil
 }
