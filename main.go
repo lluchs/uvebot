@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
@@ -20,7 +21,10 @@ const (
 	UVEGuildID            = "851213338481655878"                      // ID of the UVE guild
 	TechTeamRoleID        = "851304372976746497"                      // ID of the @Teach Team role
 	TechTeamChannelID     = "909798620281311312"                      // ID of the #tech-team channel
+	HonkChannelID         = "870342886745600021"                      // ID of the #geese-go-honk channel
 	CheckProjectsSchedule = "0 12 * * *"                              // cron configuration for the projects check
+	HonkChance            = 33                                        // chance to reply to a HONK in %
+	HonkDelay             = 30                                        // maximum delay until HONK reply in minutes
 )
 
 func main() {
@@ -72,7 +76,8 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	if m.Content == "!get-current-projects" {
+	switch m.Content {
+	case "!get-current-projects":
 		projects, err := getCurrentProjects(s, m.GuildID)
 		if err != nil {
 			s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("error: %s", err))
@@ -83,9 +88,8 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			fmt.Fprintf(&msg, "- %s due %s\n", project.ID, project.Deadline.Format("2006-01-02"))
 		}
 		s.ChannelMessageSend(m.ChannelID, msg.String())
-	}
 
-	if m.Content == "!get-website-projects" {
+	case "!get-website-projects":
 		projects, err := getWebsiteProjects()
 		if err != nil {
 			s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("error: %s", err))
@@ -96,9 +100,8 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			fmt.Fprintf(&msg, "- %s due %s\n", project.ID, project.Deadline.Format("2006-01-02"))
 		}
 		s.ChannelMessageSend(m.ChannelID, msg.String())
-	}
 
-	if m.Content == "!check-projects" {
+	case "!check-projects":
 		res, err := checkCurrentProjects(s, m.GuildID)
 		if err != nil {
 			s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("error: %s", err))
@@ -108,6 +111,15 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			res = "All good!"
 		}
 		s.ChannelMessageSend(m.ChannelID, res)
+
+	case "HONK":
+		if m.ChannelID == HonkChannelID && rand.Int31n(100) < HonkChance {
+			go func() {
+				delay := rand.Int31n(HonkDelay * 60)
+				time.Sleep(time.Duration(delay) * time.Second)
+				s.ChannelMessageSend(HonkChannelID, "HONK")
+			}()
+		}
 	}
 }
 
