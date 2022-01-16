@@ -290,6 +290,10 @@ func getWebsiteProjects() ([]*Project, error) {
 		var p Project
 		title := s.Text()
 		parts := strings.SplitN(title, " - ", 2)
+		if len(parts) != 2 {
+			// skip if incorrectly formatted
+			return
+		}
 		due, err := time.Parse("Due Jan. 2", parts[0])
 		if err != nil {
 			innerErr = err
