@@ -261,6 +261,10 @@ func getCurrentProjects(s *discordgo.Session, guildID string) ([]*Project, error
 			fmt.Printf("could not parse project: %s\n", err)
 			continue
 		}
+		// Chamber projects use threads which we can't retrieve for now.
+		if p.ID == "" {
+			continue
+		}
 		projects = append(projects, p)
 	}
 	sort.Sort(ProjectsByDeadline(projects))
