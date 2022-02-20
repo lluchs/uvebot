@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"sort"
 	"strings"
 	"syscall"
@@ -14,21 +16,35 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/bwmarrin/discordgo"
 	"github.com/robfig/cron/v3"
+	"google.golang.org/api/option"
+	"google.golang.org/api/youtube/v3"
 )
 
 const (
-	WebsiteURL            = "https://www.untitledvirtualensemble.org" // URL of the UVE website
-	UVEGuildID            = "851213338481655878"                      // ID of the UVE guild
-	TechTeamRoleID        = "851304372976746497"                      // ID of the @Teach Team role
-	TechTeamChannelID     = "909798620281311312"                      // ID of the #tech-team channel
-	HonkChannelID         = "870342886745600021"                      // ID of the #geese-go-honk channel
-	CheckProjectsSchedule = "0 12 * * *"                              // cron configuration for the projects check
-	HonkChance            = 33                                        // chance to reply to a HONK in %
-	HonkDelay             = 30                                        // maximum delay until HONK reply in minutes
+	WebsiteURL           = "https://www.untitledvirtualensemble.org"                       // URL of the UVE website
+	WebsiteReleasesURL   = "https://www.untitledvirtualensemble.org/released-performances" // URL of the releases page of the UVE website
+	UVEGuildID           = "851213338481655878"                                            // ID of the UVE guild
+	TechTeamRoleID       = "851304372976746497"                                            // ID of the @Teach Team role
+	TechTeamChannelID    = "909798620281311312"                                            // ID of the #tech-team channel
+	HonkChannelID        = "870342886745600021"                                            // ID of the #geese-go-honk channel
+	UVEPlaylistID        = "PLhCTe78BMQ8VoO7aCZYrZpdBKqCEqvMMg"                            // youtube playlist with all videos
+	CheckWebsiteSchedule = "0 12 * * *"                                                    // cron configuration for the website check
+	HonkChance           = 33                                                              // chance to reply to a HONK in %
+	HonkDelay            = 30                                                              // maximum delay until HONK reply in minutes
 )
+
+var yt *youtube.Service
 
 func main() {
 	token := os.Getenv("DISCORD_TOKEN")
+	youtubeKey := os.Getenv("YOUTUBE_API_KEY")
+
+	var err error
+	yt, err = youtube.NewService(context.TODO(), option.WithAPIKey(youtubeKey))
+	if err != nil {
+		fmt.Println("creating YouTube client failed:", err)
+		return
+	}
 
 	// Create a new Discord session using the provided bot token.
 	dg, err := discordgo.New("Bot " + token)
@@ -52,7 +68,7 @@ func main() {
 
 	// cronjob setup
 	c := cron.New()
-	c.AddFunc(CheckProjectsSchedule, func() { checkProjectsCron(dg) })
+	c.AddFunc(CheckWebsiteSchedule, func() { checkWebsiteCron(dg, yt) })
 	c.Start()
 
 	// Wait here until CTRL-C or other term signal is received.
@@ -112,6 +128,17 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 		s.ChannelMessageSend(m.ChannelID, res)
 
+	case "!check-releases":
+		res, err := checkReleases(yt)
+		if err != nil {
+			s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("error: %s", err))
+			return
+		}
+		if res == "" {
+			res = "All good!"
+		}
+		s.ChannelMessageSend(m.ChannelID, res)
+
 	case "HONK":
 		if m.ChannelID == HonkChannelID && rand.Int31n(100) < HonkChance {
 			go func() {
@@ -123,12 +150,18 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 }
 
-func checkProjectsCron(s *discordgo.Session) {
-	res, err := checkCurrentProjects(s, UVEGuildID)
+func checkWebsiteCron(s *discordgo.Session, yt *youtube.Service) {
+	projectsRes, err := checkCurrentProjects(s, UVEGuildID)
 	if err != nil {
 		s.ChannelMessageSend(TechTeamChannelID, fmt.Sprintf("!check-projects error: %s", err))
 		return
 	}
+	releasesRes, err := checkReleases(yt)
+	if err != nil {
+		s.ChannelMessageSend(TechTeamChannelID, fmt.Sprintf("!check-releases error: %s", err))
+		return
+	}
+	res := projectsRes + releasesRes
 	if res != "" {
 		s.ChannelMessageSend(TechTeamChannelID, fmt.Sprintf("<@&%s>\n%s", TechTeamRoleID, res))
 	}
@@ -314,4 +347,92 @@ func getWebsiteProjects() ([]*Project, error) {
 	}
 	sort.Sort(ProjectsByDeadline(projects))
 	return projects, nil
+}
+
+// getYoutubeVideos retrieves UVE's youtube playlist.
+func getYoutubeVideos(yt *youtube.Service) ([]youtube.PlaylistItem, error) {
+	var videos []youtube.PlaylistItem
+	call := yt.PlaylistItems.List([]string{"snippet", "contentDetails"}).PlaylistId(UVEPlaylistID).MaxResults(50)
+	err := call.Pages(context.TODO(), func(res *youtube.PlaylistItemListResponse) error {
+		for _, item := range res.Items {
+			videos = append(videos, *item)
+		}
+		return nil
+	})
+	return videos, err
+}
+
+var youtubeIDRegex = regexp.MustCompile(`(?i)(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})`)
+
+// getWebsiteProjects retrieves current projects from the UVE website.
+func getWebsiteReleases() ([]string, error) {
+	res, err := http.Get(WebsiteReleasesURL)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		return nil, fmt.Errorf("unexpected status code %d (getting %s)", res.StatusCode, WebsiteURL)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(res.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var videoIDs []string
+	var innerErr error
+
+	doc.Find(`a`).Each(func(i int, s *goquery.Selection) {
+		href, ok := s.Attr("href")
+		if !ok {
+			return
+		}
+		m := youtubeIDRegex.FindStringSubmatch(href)
+		if m == nil {
+			return
+		}
+		videoIDs = append(videoIDs, m[1])
+	})
+	if innerErr != nil {
+		return nil, innerErr
+	}
+	return videoIDs, nil
+}
+
+// checkReleases compares the website release page with the YouTube playlist.
+func checkReleases(yt *youtube.Service) (string, error) {
+	var msg strings.Builder
+
+	websiteIDs, err := getWebsiteReleases()
+	if err != nil {
+		return "", err
+	}
+	videos, err := getYoutubeVideos(yt)
+	if err != nil {
+		return "", err
+	}
+
+	videoMap := make(map[string]youtube.PlaylistItem)
+	for _, v := range videos {
+		videoMap[v.ContentDetails.VideoId] = v
+	}
+	websiteMap := make(map[string]bool)
+	for _, v := range websiteIDs {
+		websiteMap[v] = true
+	}
+
+	for _, v := range videos {
+		if _, ok := websiteMap[v.ContentDetails.VideoId]; !ok {
+			fmt.Fprintf(&msg, "- %s: missing on website (https://youtu.be/%s)\n", v.Snippet.Title, v.ContentDetails.VideoId)
+		}
+	}
+
+	for _, v := range websiteIDs {
+		if _, ok := videoMap[v]; !ok {
+			fmt.Fprintf(&msg, "- https://youtu.be/%s missing in playlist\n", v)
+		}
+	}
+
+	return msg.String(), nil
 }
