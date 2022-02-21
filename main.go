@@ -423,6 +423,9 @@ func checkReleases(yt *youtube.Service) (string, error) {
 	}
 
 	for _, v := range videos {
+		if v.Snippet.Title == "Private video" {
+			continue
+		}
 		if _, ok := websiteMap[v.ContentDetails.VideoId]; !ok {
 			fmt.Fprintf(&msg, "- %s: missing on website (https://youtu.be/%s)\n", v.Snippet.Title, v.ContentDetails.VideoId)
 		}
