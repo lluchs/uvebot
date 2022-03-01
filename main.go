@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"regexp"
@@ -21,16 +22,16 @@ import (
 )
 
 const (
-	WebsiteURL           = "https://www.untitledvirtualensemble.org"                       // URL of the UVE website
-	WebsiteReleasesURL   = "https://www.untitledvirtualensemble.org/released-performances" // URL of the releases page of the UVE website
-	UVEGuildID           = "851213338481655878"                                            // ID of the UVE guild
-	TechTeamRoleID       = "851304372976746497"                                            // ID of the @Teach Team role
-	TechTeamChannelID    = "909798620281311312"                                            // ID of the #tech-team channel
-	HonkChannelID        = "870342886745600021"                                            // ID of the #geese-go-honk channel
-	UVEPlaylistID        = "PLhCTe78BMQ8VoO7aCZYrZpdBKqCEqvMMg"                            // youtube playlist with all videos
-	CheckWebsiteSchedule = "0 12 * * *"                                                    // cron configuration for the website check
-	HonkChance           = 33                                                              // chance to reply to a HONK in %
-	HonkDelay            = 30                                                              // maximum delay until HONK reply in minutes
+	WebsiteURL           = "https://www.untitledvirtualensemble.org" // URL of the UVE website
+	WebsiteReleasesURL   = WebsiteURL + "/released-performances"     // URL of the releases page of the UVE website
+	UVEGuildID           = "851213338481655878"                      // ID of the UVE guild
+	TechTeamRoleID       = "851304372976746497"                      // ID of the @Teach Team role
+	TechTeamChannelID    = "909798620281311312"                      // ID of the #tech-team channel
+	HonkChannelID        = "870342886745600021"                      // ID of the #geese-go-honk channel
+	UVEPlaylistID        = "PLhCTe78BMQ8VoO7aCZYrZpdBKqCEqvMMg"      // youtube playlist with all videos
+	CheckWebsiteSchedule = "0 12 * * *"                              // cron configuration for the website check
+	HonkChance           = 33                                        // chance to reply to a HONK in %
+	HonkDelay            = 30                                        // maximum delay until HONK reply in minutes
 )
 
 var yt *youtube.Service
@@ -173,6 +174,7 @@ type Project struct {
 	Name     string
 	Channel  *discordgo.Channel
 	Deadline time.Time
+	URLs     []string // URLs in the body of the project page
 }
 
 // ProjectsByDeadline implements sort.Interface for []*Person based on the Deadline field.
@@ -233,6 +235,10 @@ func checkCurrentProjects(s *discordgo.Session, guildID string) (string, error) 
 	if err != nil {
 		return "", err
 	}
+	err = fetchWebsiteProjectLinks(website)
+	if err != nil {
+		return "", err
+	}
 
 	projectsMap := make(map[string]*Project)
 	websiteMap := make(map[string]*Project)
@@ -253,6 +259,25 @@ func checkCurrentProjects(s *discordgo.Session, guildID string) (string, error) 
 			}
 			if time.Now().AddDate(0, 0, -2).After(project.Deadline) {
 				fmt.Fprintf(&msg, "- %s: deadline %s has passed\n", id, project.Deadline.Format("2006-01-02"))
+			}
+			if len(website.URLs) > 0 {
+				err = fetchDiscordProjectLinks(s, project)
+				sort.Slice(project.URLs, func(i, j int) bool {
+					return project.URLs[i] < project.URLs[j]
+				})
+				if err != nil {
+					return "", fmt.Errorf("error fetching links for %s: %w", project.ID, err)
+				}
+				for _, u := range website.URLs {
+					// Does the URL also appear in Discord?
+					idx := sort.SearchStrings(project.URLs, u)
+					if idx == len(project.URLs) || project.URLs[idx] != u {
+						// However, Discord links are always okay (non-PD projects)
+						if !strings.HasPrefix(u, "https://discord.gg/") {
+							fmt.Fprintf(&msg, "- %s: URL does not appear in channel pins %s\n", id, u)
+						}
+					}
+				}
 			}
 		} else {
 			fmt.Fprintf(&msg, "- %s: on website but not in #current-projects\n", id)
@@ -304,18 +329,44 @@ func getCurrentProjects(s *discordgo.Session, guildID string) ([]*Project, error
 	return projects, nil
 }
 
-// getWebsiteProjects retrieves current projects from the UVE website.
-func getWebsiteProjects() ([]*Project, error) {
-	res, err := http.Get(WebsiteURL)
+var urlRegex *regexp.Regexp = regexp.MustCompile(`https?://[^\s]+`)
+
+// fetchDiscordProjectLinks populates the project's URLs field from pinned messages in Discord.
+func fetchDiscordProjectLinks(s *discordgo.Session, p *Project) error {
+	if p.Channel == nil {
+		return nil
+	}
+	pinned, err := s.ChannelMessagesPinned(p.Channel.ID)
+	if err != nil {
+		return err
+	}
+	for _, msg := range pinned {
+		for _, match := range urlRegex.FindAllString(msg.Content, -1) {
+			// remove trailing dots
+			if match[len(match)-1] == '.' {
+				match = match[:len(match)-1]
+			}
+			p.URLs = append(p.URLs, match)
+		}
+	}
+	return nil
+}
+
+func httpGetDoc(url string) (*goquery.Document, error) {
+	res, err := http.Get(url)
 	if err != nil {
 		return nil, err
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
-		return nil, fmt.Errorf("unexpected status code %d (getting %s)", res.StatusCode, WebsiteURL)
+		return nil, fmt.Errorf("unexpected status code %d (getting %s)", res.StatusCode, url)
 	}
+	return goquery.NewDocumentFromReader(res.Body)
+}
 
-	doc, err := goquery.NewDocumentFromReader(res.Body)
+// getWebsiteProjects retrieves current projects from the UVE website.
+func getWebsiteProjects() ([]*Project, error) {
+	doc, err := httpGetDoc(WebsiteURL)
 	if err != nil {
 		return nil, err
 	}
@@ -347,6 +398,30 @@ func getWebsiteProjects() ([]*Project, error) {
 	}
 	sort.Sort(ProjectsByDeadline(projects))
 	return projects, nil
+}
+
+// fetchWebsiteProjectLinks populates the project's URLs field.
+func fetchWebsiteProjectLinks(projects []*Project) error {
+	for _, p := range projects {
+		doc, err := httpGetDoc(WebsiteURL + "/projects/" + p.ID)
+		if err != nil {
+			return err
+		}
+		// Find all links in the main text
+		doc.Find(`div[role=main] section:nth-child(2) a`).Each(func(i int, s *goquery.Selection) {
+			if href, ok := s.Attr("href"); ok {
+				if strings.HasPrefix(href, "https://www.google.com/url?q=") {
+					gurl, err := url.Parse(href)
+					if err != nil {
+						fmt.Println("error while decoding google url: ", err)
+					}
+					href = gurl.Query().Get("q")
+				}
+				p.URLs = append(p.URLs, href)
+			}
+		})
+	}
+	return nil
 }
 
 // getYoutubeVideos retrieves UVE's youtube playlist.
