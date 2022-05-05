@@ -397,8 +397,11 @@ func getWebsiteProjects() ([]*Project, error) {
 		}
 		due, err := time.Parse("Due Jan. 2", parts[0])
 		if err != nil {
-			innerErr = err
-			return
+			due, err = time.Parse("Due January 2", parts[0])
+			if err != nil {
+				innerErr = err
+				return
+			}
 		}
 		p.Name = parts[1]
 		p.ID = s.AttrOr("href", "/projects/")[10:]
