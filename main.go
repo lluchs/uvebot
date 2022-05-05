@@ -342,7 +342,8 @@ func getCurrentProjects(s *discordgo.Session, guildID string) ([]*Project, error
 	return projects, nil
 }
 
-var urlRegex *regexp.Regexp = regexp.MustCompile(`https?://[^\s]+`)
+// urlRegex should match URLs in Discord messages. Exclude * for **bold** URLs.
+var urlRegex *regexp.Regexp = regexp.MustCompile(`https?://[^\s*]+`)
 
 // fetchDiscordProjectLinks populates the project's URLs field from pinned messages in Discord.
 func fetchDiscordProjectLinks(s *discordgo.Session, p *Project) error {
