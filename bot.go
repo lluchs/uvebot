@@ -46,7 +46,8 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	case "!get-current-projects",
 		"!get-website-projects",
 		"!check-projects",
-		"!check-releases":
+		"!check-releases",
+		"!check-host-responses":
 		res, err := handleCommand(m.Content, s)
 		if err != nil {
 			s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("error: %s", err))

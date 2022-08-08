@@ -7,11 +7,13 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/bwmarrin/discordgo"
+	"google.golang.org/api/sheets/v4"
 	"google.golang.org/api/youtube/v3"
 )
 
@@ -375,5 +377,32 @@ func checkReleases(yt *youtube.Service) (string, error) {
 		}
 	}
 
+	return msg.String(), nil
+}
+
+func checkHostResponses(sheetsService *sheets.Service) (string, error) {
+	stateRes, err := sheetsService.Spreadsheets.Values.Get(HostResponsesSheetID, HostResponsesBotSheet+"!B3:B3").Do()
+	if err != nil {
+		return "", fmt.Errorf("could not query host responses sheet for bot state: %w", err)
+	}
+	id, err := strconv.Atoi(stateRes.Values[0][0].(string))
+	if err != nil {
+		return "", fmt.Errorf("invalid last row id: %w", err)
+	}
+	res, err := sheetsService.Spreadsheets.Values.Get(HostResponsesSheetID, fmt.Sprintf("%s!A%d:I", HostResponsesSheet, id)).ValueRenderOption("UNFORMATTED_VALUE").Do()
+	if err != nil {
+		return "", fmt.Errorf("could not query host responses sheet: %w", err)
+	}
+	rb := &sheets.ValueRange{
+		Values: [][]interface{}{{id + len(res.Values)}},
+	}
+	_, err = sheetsService.Spreadsheets.Values.Update(HostResponsesSheetID, HostResponsesBotSheet+"!B3:B3", rb).ValueInputOption("RAW").Do()
+	if err != nil {
+		return "", fmt.Errorf("could not update last row id: %w", err)
+	}
+	var msg strings.Builder
+	for _, row := range res.Values {
+		fmt.Fprintf(&msg, "**%s** proposes *%s*\n", row[1], row[8])
+	}
 	return msg.String(), nil
 }

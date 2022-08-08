@@ -3,22 +3,40 @@ package main
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 
 	"github.com/bwmarrin/discordgo"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
+	"google.golang.org/api/sheets/v4"
 	"google.golang.org/api/youtube/v3"
 )
 
 var yt *youtube.Service
+var sheetsService *sheets.Service
 
-// InitYouTube initializes the YouTube API client.
-func InitYouTube(key string) error {
+// InitGoogle initializes the YouTube and Sheets API clients.
+func InitGoogle(key string) error {
 	var err error
 	yt, err = youtube.NewService(context.TODO(), option.WithAPIKey(key))
+	if err != nil {
+		return err
+	}
+	data, err := ioutil.ReadFile("google_key.json")
+	if err != nil {
+		return fmt.Errorf("could not retrieve google_key.json: %w", err)
+	}
+	conf, err := google.JWTConfigFromJSON(data, "https://www.googleapis.com/auth/spreadsheets")
+	if err != nil {
+		return fmt.Errorf("could initialize service client: %w", err)
+	}
+	client := conf.Client(oauth2.NoContext)
+	sheetsService, err = sheets.NewService(context.TODO(), option.WithHTTPClient(client))
 	return err
 }
 
@@ -29,12 +47,13 @@ func usage() {
 	fmt.Println(" - get-current-projects")
 	fmt.Println(" - check-projects")
 	fmt.Println(" - check-releases")
+	fmt.Println(" - check-host-responses")
 	fmt.Println(" - get-website-projects")
 }
 
 func main() {
 	token := os.Getenv("DISCORD_TOKEN")
-	youtubeKey := os.Getenv("YOUTUBE_API_KEY")
+	youtubeKey := os.Getenv("GOOGLE_API_KEY")
 
 	if len(os.Args) < 2 {
 		usage()
@@ -42,8 +61,8 @@ func main() {
 	}
 
 	if youtubeKey != "" {
-		if err := InitYouTube(youtubeKey); err != nil {
-			fmt.Println("creating YouTube client failed:", err)
+		if err := InitGoogle(youtubeKey); err != nil {
+			fmt.Println("creating Google API client failed:", err)
 			return
 		}
 	}
@@ -90,7 +109,8 @@ func main() {
 		fmt.Println(res)
 
 	// Commands that need a YouTube client
-	case "check-releases":
+	case "check-releases",
+		"check-host-responses":
 		if yt == nil {
 			fmt.Println("need a YouTube client!")
 			return
@@ -164,6 +184,19 @@ func handleCommand(cmd string, dg *discordgo.Session) (string, error) {
 		}
 		if res == "" {
 			res = "All good!"
+		}
+		return res, nil
+
+	case "!check-host-responses":
+		if sheetsService == nil {
+			return "", fmt.Errorf("no Google Sheets credentials supplied")
+		}
+		res, err := checkHostResponses(sheetsService)
+		if err != nil {
+			return "", err
+		}
+		if res == "" {
+			res = "Nothing new!"
 		}
 		return res, nil
 	}
