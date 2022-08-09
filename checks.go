@@ -393,12 +393,14 @@ func checkHostResponses(sheetsService *sheets.Service) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("could not query host responses sheet: %w", err)
 	}
-	rb := &sheets.ValueRange{
-		Values: [][]interface{}{{id + len(res.Values)}},
-	}
-	_, err = sheetsService.Spreadsheets.Values.Update(HostResponsesSheetID, HostResponsesBotSheet+"!B3:B3", rb).ValueInputOption("RAW").Do()
-	if err != nil {
-		return "", fmt.Errorf("could not update last row id: %w", err)
+	if len(res.Values) > 0 {
+		rb := &sheets.ValueRange{
+			Values: [][]interface{}{{id + len(res.Values)}},
+		}
+		_, err = sheetsService.Spreadsheets.Values.Update(HostResponsesSheetID, HostResponsesBotSheet+"!B3:B3", rb).ValueInputOption("RAW").Do()
+		if err != nil {
+			return "", fmt.Errorf("could not update last row id: %w", err)
+		}
 	}
 	var msg strings.Builder
 	for _, row := range res.Values {
