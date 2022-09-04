@@ -21,7 +21,7 @@ func InitBot(token string, listen bool) (*discordgo.Session, error) {
 		dg.AddHandler(messageCreate)
 
 		// In this example, we only care about receiving message events.
-		dg.Identify.Intents = discordgo.IntentsGuildMessages
+		dg.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsMessageContent
 	}
 
 	// Open a websocket connection to Discord and begin listening.
