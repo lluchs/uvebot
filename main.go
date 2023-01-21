@@ -99,7 +99,6 @@ func main() {
 			return
 		}
 		defer dg.Close()
-		fmt.Println(cmd)
 
 		res, err := handleCommand("!"+cmd, dg)
 		if err != nil {
@@ -111,12 +110,19 @@ func main() {
 	// Commands that need a YouTube client
 	case "check-releases",
 		"check-host-responses":
+		dg, err := InitBot(token, false)
+		if err != nil {
+			fmt.Println("error creating Discord session,", err)
+			return
+		}
+		defer dg.Close()
+
 		if yt == nil {
 			fmt.Println("need a YouTube client!")
 			return
 		}
 
-		res, err := handleCommand("!"+cmd, nil)
+		res, err := handleCommand("!"+cmd, dg)
 		if err != nil {
 			fmt.Println("error: ", err)
 			return
@@ -191,12 +197,17 @@ func handleCommand(cmd string, dg *discordgo.Session) (string, error) {
 		if sheetsService == nil {
 			return "", fmt.Errorf("no Google Sheets credentials supplied")
 		}
-		res, err := checkHostResponses(sheetsService)
+		responses, err := checkHostResponses(sheetsService)
 		if err != nil {
 			return "", err
 		}
-		if res == "" {
-			res = "Nothing new!"
+		res := ""
+		for _, response := range responses {
+			channel, err := createProposedProjectChannel(dg, &response)
+			if err != nil {
+				return "", err
+			}
+			res += response.Message + fmt.Sprintf(" <#%s>\n", channel.ID)
 		}
 		return res, nil
 	}

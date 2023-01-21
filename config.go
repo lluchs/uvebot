@@ -10,6 +10,7 @@ const (
 	HonkChannelID         = "870342886745600021"                           // ID of the #geese-go-honk channel
 	StaffBotSpamChannelID = "924839541959983124"                           // ID of the #staff-bot-spam channel
 	UVEPlaylistID         = "PLhCTe78BMQ8VoO7aCZYrZpdBKqCEqvMMg"           // youtube playlist with all videos
+	HostResponsesCategID  = "1046543356123173015"                          // category for host responses discussion
 	HostResponsesSheetID  = "1-Lf5-y8Vvfj1IynA8hWG1wWBstXA5OpGLn5UGU2k4Ek" // spreadsheet id of host responses
 	HostResponsesSheet    = "Form Responses 1"                             // name of sheet with responses
 	HostResponsesBotSheet = "UVE Bot"                                      // name of sheet with bot state

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -380,31 +381,94 @@ func checkReleases(yt *youtube.Service) (string, error) {
 	return msg.String(), nil
 }
 
-func checkHostResponses(sheetsService *sheets.Service) (string, error) {
+type hostResponse struct {
+	// Message to show in #music-team
+	Message string
+	// Name of proposed piece
+	Name string
+	// Channel name
+	Slug string
+	// Raw response, pairs of question, answer
+	Response [][]string
+}
+
+// checkHostResponses queries Google Sheets for new host responses.
+func checkHostResponses(sheetsService *sheets.Service) ([]hostResponse, error) {
 	stateRes, err := sheetsService.Spreadsheets.Values.Get(HostResponsesSheetID, HostResponsesBotSheet+"!B3:B3").Do()
 	if err != nil {
-		return "", fmt.Errorf("could not query host responses sheet for bot state: %w", err)
+		return nil, fmt.Errorf("could not query host responses sheet for bot state: %w", err)
 	}
 	id, err := strconv.Atoi(stateRes.Values[0][0].(string))
 	if err != nil {
-		return "", fmt.Errorf("invalid last row id: %w", err)
+		return nil, fmt.Errorf("invalid last row id: %w", err)
 	}
-	res, err := sheetsService.Spreadsheets.Values.Get(HostResponsesSheetID, fmt.Sprintf("%s!A%d:I", HostResponsesSheet, id)).ValueRenderOption("UNFORMATTED_VALUE").Do()
+	res, err := sheetsService.Spreadsheets.Values.Get(HostResponsesSheetID, fmt.Sprintf("%s!A%d:M", HostResponsesSheet, id)).ValueRenderOption("UNFORMATTED_VALUE").Do()
 	if err != nil {
-		return "", fmt.Errorf("could not query host responses sheet: %w", err)
+		return nil, fmt.Errorf("could not query host responses sheet: %w", err)
 	}
+	var titles []string
 	if len(res.Values) > 0 {
 		rb := &sheets.ValueRange{
 			Values: [][]interface{}{{id + len(res.Values)}},
 		}
 		_, err = sheetsService.Spreadsheets.Values.Update(HostResponsesSheetID, HostResponsesBotSheet+"!B3:B3", rb).ValueInputOption("RAW").Do()
 		if err != nil {
-			return "", fmt.Errorf("could not update last row id: %w", err)
+			return nil, fmt.Errorf("could not update last row id: %w", err)
+		}
+
+		// get column titles for embed formatting
+		titlesRes, err := sheetsService.Spreadsheets.Values.Get(HostResponsesSheetID, fmt.Sprintf("%s!A1:M", HostResponsesSheet)).ValueRenderOption("UNFORMATTED_VALUE").Do()
+		if err != nil {
+			return nil, fmt.Errorf("could not get column titles from host responses sheet: %w", err)
+		}
+		for _, title := range titlesRes.Values[0] {
+			titles = append(titles, fmt.Sprintf("%s", title))
 		}
 	}
-	var msg strings.Builder
+	var responses []hostResponse
 	for _, row := range res.Values {
-		fmt.Fprintf(&msg, "**%s** proposes *%s*\n", row[1], row[8])
+		strRow := make([]string, 0, len(row))
+		for _, val := range row {
+			strRow = append(strRow, fmt.Sprintf("%s", val))
+		}
+		strRow[0] = fmt.Sprintf("<t:%d:f>", convertSheetsDate(row[0].(float64)).Unix())
+		responses = append(responses, hostResponse{
+			Message:  fmt.Sprintf("**%s** proposes *%s*", row[1], row[8]),
+			Name:     strRow[8],
+			Slug:     slugify(strRow[8]),
+			Response: zip(titles, strRow),
+		})
 	}
-	return msg.String(), nil
+	return responses, nil
+}
+
+func convertSheetsDate(date float64) time.Time {
+	i, f := math.Modf(date)
+	t := time.Date(1899, 12, 30, 0, 0, 0, 0, time.UTC)
+	return t.AddDate(0, 0, int(i)).Add(time.Duration(float64(24*time.Hour) * f))
+}
+
+var (
+	slugRemoveCharacters = regexp.MustCompile(`[^-a-z0-9 ]`)
+	slugSpace            = regexp.MustCompile(`[- ]+`)
+)
+
+// slugify makes an appropriate channel name.
+func slugify(name string) string {
+	name = strings.ToLower(name)
+	name = slugRemoveCharacters.ReplaceAllString(name, "")
+	name = slugSpace.ReplaceAllString(name, "-")
+	return name
+}
+
+func zip[T any](a, b []T) [][]T {
+	l := len(a)
+	if len(b) < l {
+		l = len(b)
+	}
+	res := make([][]T, 0, l)
+	for i := 0; i < l; i++ {
+		res = append(res, []T{a[i], b[i]})
+	}
+	return res
 }

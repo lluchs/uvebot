@@ -1,14 +1,16 @@
 module github.com/lluchs/uvebot
 
-go 1.17
+go 1.19
 
 require (
 	github.com/PuerkitoBio/goquery v1.8.0
-	github.com/bwmarrin/discordgo v0.26.0
+	github.com/bwmarrin/discordgo v0.26.1
 	github.com/robfig/cron/v3 v3.0.1
 	golang.org/x/oauth2 v0.0.0-20201109201403-9fd604954f58
 	google.golang.org/api v0.36.0
 )
+
+replace github.com/bwmarrin/discordgo => ../discordgo
 
 require (
 	cloud.google.com/go v0.72.0 // indirect

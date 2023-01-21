@@ -37,12 +37,41 @@ func checkWebsiteCron(s *discordgo.Session, yt *youtube.Service) {
 }
 
 func checkHRCron(s *discordgo.Session, sheetsService *sheets.Service) {
-	msg, err := checkHostResponses(sheetsService)
+	responses, err := checkHostResponses(sheetsService)
 	if err != nil {
 		s.ChannelMessageSend(TechTeamChannelID, fmt.Sprintf("!check-host-responses error: %s", err))
 		return
 	}
-	if msg != "" {
-		s.ChannelMessageSend(MusicTeamChannelID, msg)
+	for _, response := range responses {
+		channel, err := createProposedProjectChannel(s, &response)
+		if err != nil {
+			s.ChannelMessageSend(TechTeamChannelID, fmt.Sprintf("!check-host-responses error: %s", err))
+		}
+		s.ChannelMessageSend(MusicTeamChannelID, response.Message+fmt.Sprintf(" <#%s>", channel.ID))
 	}
+}
+
+func createProposedProjectChannel(s *discordgo.Session, response *hostResponse) (*discordgo.Channel, error) {
+	channel, err := s.GuildChannelCreateComplex(UVEGuildID, discordgo.GuildChannelCreateData{
+		Name:     response.Slug,
+		Topic:    response.Name,
+		ParentID: HostResponsesCategID,
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("could not create channel #%s: %w", response.Slug, err)
+	}
+	var embed discordgo.MessageEmbed
+	for _, val := range response.Response {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   val[0],
+			Value:  val[1],
+			Inline: false,
+		})
+	}
+	_, err = s.ChannelMessageSendEmbed(channel.ID, &embed)
+	if err != nil {
+		return nil, fmt.Errorf("could not send message to #%s: %w", response.Slug, err)
+	}
+	return channel, nil
 }
