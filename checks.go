@@ -24,6 +24,7 @@ type Project struct {
 	Name     string
 	Channel  *discordgo.Channel
 	Deadline time.Time
+	Status   string   // e.g., "Accepting Recordings"
 	URLs     []string // URLs in the body of the project page
 }
 
@@ -71,6 +72,8 @@ func parseProject(msg *discordgo.Message, channels []*discordgo.Channel) (*Proje
 				return nil, fmt.Errorf("could not get message snowflake timestamp for %s: %w", msg.ID, err)
 			}
 			p.Deadline = relativeYear(t, ctime)
+		} else if strings.HasPrefix(line, "Status: ") {
+			p.Status = line[len("Status: "):]
 		} else if strings.HasPrefix(line, "<#") {
 			cid := strings.Trim(line, "<#> ")
 			for _, c := range channels {
@@ -117,7 +120,7 @@ func checkCurrentProjects(s *discordgo.Session, guildID string) (string, error) 
 			if website.Deadline != project.Deadline {
 				fmt.Fprintf(&msg, "- %s: wrong deadline (website: %s, #current-projects: %s)\n", id, website.Deadline.Format("2006-01-02"), project.Deadline.Format("2006-01-02"))
 			}
-			if time.Now().AddDate(0, 0, -2).After(project.Deadline) {
+			if time.Now().AddDate(0, 0, -2).After(project.Deadline) && project.Status != "Accepting Recordings" {
 				fmt.Fprintf(&msg, "- %s: deadline %s has passed\n", id, project.Deadline.Format("2006-01-02"))
 			}
 			if len(website.URLs) > 0 {
